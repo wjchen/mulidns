@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unsafe"
+
+	"github.com/pmylund/go-cache"
 )
 
 const (
@@ -99,8 +101,11 @@ var badIPs = []uint32{
 	0xcc0dfa22, 0xcc0dfb22, 0xd04e4622, 0xd04e4722,
 }
 
+var dnsCache *cache.Cache
+
 func init() {
 	rand.Seed(time.Now().Unix())
+	dnsCache = cache.New(time.Hour, time.Minute)
 }
 
 func nameQdTrans(name string) ([]byte, error) {
@@ -296,7 +301,7 @@ func resolve(name string, conn *net.UDPConn, chn chan<- []byte) {
 	chn <- ip
 }
 
-func MultiServerDNSInit(servers []string) error {
+func DNSInit(servers []string) error {
 	if len(addrs) != 0 {
 		addrs = make([]*net.UDPAddr, 0)
 	}
@@ -332,7 +337,12 @@ func MultiServerDNSInit(servers []string) error {
 	return nil
 }
 
-func MultiServerDNS(name string) (net.IP, error) {
+func DNSQuery(name string) (net.IP, error) {
+	if v, ok := dnsCache.Get(name); ok {
+		if ip, ok := v.([]byte); ok && len(ip) == net.IPv4len {
+			return ip, nil
+		}
+	}
 	n := len(addrs)
 	if n == 0 {
 		return net.IP{}, dnsNoServerError
@@ -380,6 +390,7 @@ func MultiServerDNS(name string) (net.IP, error) {
 					continue
 				}
 			}
+			dnsCache.Add(name, ip, cache.DefaultExpiration)
 			return ip, nil
 		}
 	}
